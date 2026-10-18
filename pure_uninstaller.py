@@ -29,20 +29,24 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 PALETTE = {
-    "bg_root": "#0F1117",        # Deep Fluent Mica-style background
-    "bg_surface": "#181B24",     # Elevated container surface
-    "bg_card": "#1E222D",        # Program item card background
-    "bg_card_hover": "#262B38",  # Card hover highlight
-    "border": "#2D3343",         # Subtle 1px stroke
-    "accent": "#00A8E8",         # Primary Fluent Cyan/Blue
-    "accent_hover": "#0086BA",   # Primary hover state
-    "danger": "#E84855",         # Destructive action red
-    "danger_hover": "#C43541",   # Destructive hover
-    "success": "#2EC4B6",        # Safe/Clean emerald
-    "warning": "#FF9F1C",        # Elevation / Warning amber
-    "text_primary": "#F3F4F6",   # High-contrast label
-    "text_secondary": "#9CA3AF", # Muted subtext
-    "text_muted": "#6B7280",     # Technical path / metadata text
+    "bg_root": "#0B0D13",        # Sleek Obsidian Fluent Canvas
+    "bg_surface": "#12151E",     # Deep translucent acrylic container
+    "bg_card": "#181B26",        # Compact elevated card
+    "bg_card_hover": "#222736",  # Subtle luminous card highlight
+    "border": "#232838",         # Micro-fine 1px border stroke
+    "border_light": "#31384E",   # Subtle elevated component border
+    "accent": "#0EA5E9",         # Modern Windows 11 Sky Cyan
+    "accent_hover": "#0284C7",   # Sky Cyan hover state
+    "accent_subtle": "#0F2942",  # Ghost badge background
+    "danger": "#EF4444",         # Destructive action red
+    "danger_hover": "#DC2626",   # Destructive hover
+    "danger_subtle": "#3B181E",  # Soft destructive background
+    "success": "#10B981",        # Emerald clean badge
+    "success_subtle": "#0F2F24", # Subtle emerald fill
+    "warning": "#F59E0B",        # Amber badge
+    "text_primary": "#F8FAFC",   # High-clarity primary text
+    "text_secondary": "#94A3B8", # Fluent subtext slate
+    "text_muted": "#64748B",     # Technical metadata muted text
 }
 
 # Generic publisher/app words excluded from leftover matching to avoid false positives
@@ -1098,7 +1102,7 @@ class PureUninstallerApp(ctk.CTk):
 
         brand_sub = ctk.CTkLabel(
             self.sidebar,
-            text="Zero-Bloat Artifact & Registry Auditor",
+            text="Fluent Leftover Auditor v1.1.0",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=PALETTE["accent"],
             anchor="w",
@@ -1432,67 +1436,115 @@ class PureUninstallerApp(ctk.CTk):
         card = ctk.CTkFrame(
             parent,
             fg_color=PALETTE["bg_card"],
-            corner_radius=10,
+            corner_radius=8,
             border_width=1,
             border_color=PALETTE["border"],
         )
-        card.grid_columnconfigure(0, weight=1)
+        card.grid_columnconfigure(1, weight=1)
 
-        # Left Info Column
+        # Micro indicator badge / icon placeholder
+        icon_box = ctk.CTkFrame(
+            card,
+            width=36,
+            height=36,
+            corner_radius=8,
+            fg_color=PALETTE["accent_subtle"],
+            border_width=1,
+            border_color=PALETTE["border_light"],
+        )
+        icon_box.grid(row=0, column=0, padx=(14, 10), pady=10, sticky="w")
+        icon_box.grid_propagate(False)
+
+        initial_letter = app.name[:1].upper() if app.name else "A"
+        icon_lbl = ctk.CTkLabel(
+            icon_box,
+            text=initial_letter,
+            font=ctk.CTkFont(family="Segoe UI Variable Display", size=15, weight="bold"),
+            text_color=PALETTE["accent"],
+        )
+        icon_lbl.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Center Info Column
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.grid(row=0, column=0, padx=16, pady=12, sticky="ew")
+        info_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ew")
         info_frame.grid_columnconfigure(0, weight=1)
 
+        name_row = ctk.CTkFrame(info_frame, fg_color="transparent")
+        name_row.grid(row=0, column=0, sticky="ew")
+
         title_lbl = ctk.CTkLabel(
-            info_frame,
+            name_row,
             text=app.name,
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=15),
+            font=ctk.CTkFont(family="Segoe UI Variable Display", size=14, weight="bold"),
             text_color=PALETTE["text_primary"],
             anchor="w",
         )
-        title_lbl.grid(row=0, column=0, sticky="ew")
+        title_lbl.pack(side="left", padx=(0, 8))
 
-        sub_text = (
-            f"Publisher: {app.publisher}   •   "
-            f"Installed: {app.formatted_date}   •   "
-            f"Scope: {app.registry_hive_name} ({app.arch_view})"
+        # Modern Arch Badge (x64 / x86 / User)
+        arch_color = PALETTE["success"] if "64" in app.arch_view else PALETTE["warning"]
+        arch_badge = ctk.CTkLabel(
+            name_row,
+            text=f" {app.arch_view.upper()} ",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=arch_color,
+            fg_color=PALETTE["bg_surface"],
+            corner_radius=4,
         )
+        arch_badge.pack(side="left")
+
+        sub_text = f"{app.publisher}  •  {app.formatted_date}  •  {app.registry_hive_name}"
         sub_lbl = ctk.CTkLabel(
             info_frame,
             text=sub_text,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=PALETTE["text_secondary"],
             anchor="w",
         )
         sub_lbl.grid(row=1, column=0, pady=(2, 0), sticky="ew")
 
-        # Right Size Badge + Action Button
+        # Right Actions Frame
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
-        right_frame.grid(row=0, column=1, padx=16, pady=12, sticky="e")
+        right_frame.grid(row=0, column=2, padx=14, pady=10, sticky="e")
 
         size_badge = ctk.CTkLabel(
             right_frame,
             text=app.formatted_size,
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=13),
-            text_color=PALETTE["accent"],
-            width=95,
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+            text_color=PALETTE["text_secondary"],
+            width=85,
             anchor="e",
         )
-        size_badge.pack(side="left", padx=(0, 16))
+        size_badge.pack(side="left", padx=(0, 14))
 
+        # Modern Ghost/Outline Action Button
         btn_action = ctk.CTkButton(
             right_frame,
-            text="Analyze & Uninstall",
-            width=155,
-            height=34,
-            corner_radius=8,
-            fg_color=PALETTE["accent"],
+            text="Uninstall",
+            width=110,
+            height=30,
+            corner_radius=6,
+            fg_color=PALETTE["bg_surface"],
             hover_color=PALETTE["accent_hover"],
-            text_color="#FFFFFF",
-            font=ctk.CTkFont(family="Segoe UI Semibold", size=12),
+            border_width=1,
+            border_color=PALETTE["border_light"],
+            text_color=PALETTE["text_primary"],
+            font=ctk.CTkFont(family="Segoe UI Semibold", size=11),
             command=lambda target_app=app: self.initiate_uninstall_workflow(target_app),
         )
         btn_action.pack(side="left")
+
+        # Hover Effect on card
+        def _on_enter(_e):
+            card.configure(fg_color=PALETTE["bg_card_hover"], border_color=PALETTE["accent"])
+
+        def _on_leave(_e):
+            card.configure(fg_color=PALETTE["bg_card"], border_color=PALETTE["border"])
+
+        card.bind("<Enter>", _on_enter)
+        card.bind("<Leave>", _on_leave)
+        info_frame.bind("<Enter>", _on_enter)
+        info_frame.bind("<Leave>", _on_leave)
 
         return card
 
