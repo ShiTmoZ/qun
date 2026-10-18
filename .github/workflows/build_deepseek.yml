@@ -1,0 +1,41 @@
+name: Build DeepSeek Edition Executable
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'pure_uninstaller_deepseek.py'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter==5.2.2 pyinstaller
+
+    - name: Build Standalone Executable with PyInstaller
+      shell: pwsh
+      run: |
+        py -3.12 -m PyInstaller --noconfirm --clean --onefile --windowed --name "PureUninstaller-DeepSeek" --collect-all customtkinter pure_uninstaller_deepseek.py
+
+    - name: Upload Binary Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PureUninstaller-DeepSeek-x64
+        path: dist/PureUninstaller-DeepSeek.exe
+        if-no-files-found: error
