@@ -253,6 +253,10 @@ class IconExtractor:
 
         cls._cache[clean_path] = None
         return None
+
+
+def format_bytes(num_bytes: int) -> str:
+    """Formats raw byte counts into human-readable KB/MB/GB strings."""
     if num_bytes <= 0:
         return "0 B"
     units = ["B", "KB", "MB", "GB", "TB"]
