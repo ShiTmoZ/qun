@@ -1,0 +1,51 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Build Standalone Executable with PyInstaller
+      shell: pwsh
+      run: |
+        $ctk_path = python -c "import customtkinter, os; print(os.path.dirname(customtkinter.__file__))"
+        pyinstaller --noconsole --onefile --name "PureUninstaller" --add-data "${ctk_path};customtkinter/" pure_uninstaller.py
+
+    - name: Upload Binary Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PureUninstaller-Windows-x64
+        path: dist/PureUninstaller.exe
+        if-no-files-found: error
+
+    - name: Create Release on Tag
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/PureUninstaller.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
