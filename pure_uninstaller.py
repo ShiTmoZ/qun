@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import customtkinter as ctk
+from PIL import Image
 from tkinter import messagebox
 
 # ==============================================================================
@@ -126,8 +127,94 @@ class LeftoverItem:
 # ==============================================================================
 # UTILITY & SAFETY FUNCTIONS
 # ==============================================================================
-def format_bytes(num_bytes: int) -> str:
-    """Formats raw byte counts into human-readable KB/MB/GB strings."""
+# ==============================================================================
+# WINDOWS NATIVE ICON EXTRACTOR
+# ==============================================================================
+class IconExtractor:
+    """Extracts native Windows icons from DisplayIcon paths using Shell32 ExtractIconEx."""
+
+    _cache: Dict[str, Optional[ctk.CTkImage]] = {}
+
+    @classmethod
+    def get_app_icon(cls, icon_path_raw: str, size: Tuple[int, int] = (24, 24)) -> Optional[ctk.CTkImage]:
+        if not icon_path_raw or sys.platform != "win32":
+            return None
+
+        clean_path = icon_path_raw.strip().strip('"').strip("'")
+        if not clean_path:
+            return None
+
+        icon_index = 0
+        if "," in clean_path:
+            parts = clean_path.rsplit(",", 1)
+            clean_path = parts[0].strip().strip('"')
+            try:
+                icon_index = int(parts[1].strip())
+            except ValueError:
+                icon_index = 0
+
+        clean_path = os.path.expandvars(clean_path)
+        if clean_path in cls._cache:
+            return cls._cache[clean_path]
+
+        # 1. Direct .ico file
+        if clean_path.lower().endswith(".ico") and os.path.isfile(clean_path):
+            try:
+                pil_img = Image.open(clean_path).convert("RGBA")
+                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+                cls._cache[clean_path] = ctk_img
+                return ctk_img
+            except Exception:
+                pass
+
+        # 2. Extract from .exe / .dll via win32 API
+        if (clean_path.lower().endswith((".exe", ".dll")) or "." not in os.path.basename(clean_path)) and os.path.isfile(clean_path):
+            try:
+                import win32gui
+                import win32ui
+                import win32con
+
+                large, small = win32gui.ExtractIconEx(clean_path, icon_index)
+                hicon = None
+                if small and len(small) > 0:
+                    hicon = small[0]
+                elif large and len(large) > 0:
+                    hicon = large[0]
+
+                if hicon:
+                    hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+                    hbmp = win32ui.CreateBitmap()
+                    hbmp.CreateCompatibleBitmap(hdc, 32, 32)
+                    memdc = hdc.CreateCompatibleDC()
+                    memdc.SelectObject(hbmp)
+                    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, 32, 32, 0, 0, win32con.DI_NORMAL)
+
+                    bmpinfo = hbmp.GetInfo()
+                    bmpstr = hbmp.GetBitmapBits(True)
+                    pil_img = Image.frombuffer(
+                        "RGBA", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]), bmpstr, "raw", "BGRA", 0, 1
+                    )
+
+                    win32gui.DestroyIcon(hicon)
+                    for h in (large or []):
+                        try:
+                            win32gui.DestroyIcon(h)
+                        except Exception:
+                            pass
+                    for h in (small or []):
+                        try:
+                            win32gui.DestroyIcon(h)
+                        except Exception:
+                            pass
+
+                    ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+                    cls._cache[clean_path] = ctk_img
+                    return ctk_img
+            except Exception:
+                pass
+
+        cls._cache[clean_path] = None
+        return None
     if num_bytes <= 0:
         return "0 B"
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -1102,7 +1189,7 @@ class PureUninstallerApp(ctk.CTk):
 
         brand_sub = ctk.CTkLabel(
             self.sidebar,
-            text="Fluent Leftover Auditor v1.1.0",
+            text="Fluent Leftover Auditor v1.2.0",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=PALETTE["accent"],
             anchor="w",
@@ -1456,12 +1543,21 @@ class PureUninstallerApp(ctk.CTk):
         icon_box.grid_propagate(False)
 
         initial_letter = app.name[:1].upper() if app.name else "A"
-        icon_lbl = ctk.CTkLabel(
-            icon_box,
-            text=initial_letter,
-            font=ctk.CTkFont(family="Segoe UI Variable Display", size=15, weight="bold"),
-            text_color=PALETTE["accent"],
-        )
+        app_icon = IconExtractor.get_app_icon(app.display_icon, size=(22, 22))
+
+        if app_icon:
+            icon_lbl = ctk.CTkLabel(
+                icon_box,
+                image=app_icon,
+                text="",
+            )
+        else:
+            icon_lbl = ctk.CTkLabel(
+                icon_box,
+                text=initial_letter,
+                font=ctk.CTkFont(family="Segoe UI Variable Display", size=15, weight="bold"),
+                text_color=PALETTE["accent"],
+            )
         icon_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
         # Center Info Column
