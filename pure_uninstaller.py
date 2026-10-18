@@ -128,10 +128,10 @@ class LeftoverItem:
 # UTILITY & SAFETY FUNCTIONS
 # ==============================================================================
 # ==============================================================================
-# WINDOWS NATIVE ICON EXTRACTOR
+# WINDOWS NATIVE ICON EXTRACTOR (PURE CTYPES + PILLOW, ZERO WIN32 EXTRA LIBS)
 # ==============================================================================
 class IconExtractor:
-    """Extracts native Windows icons from DisplayIcon paths using Shell32 ExtractIconEx."""
+    """Extracts native Windows icons from DisplayIcon paths using ctypes and PIL."""
 
     _cache: Dict[str, Optional[ctk.CTkImage]] = {}
 
@@ -167,49 +167,87 @@ class IconExtractor:
             except Exception:
                 pass
 
-        # 2. Extract from .exe / .dll via win32 API
-        if (clean_path.lower().endswith((".exe", ".dll")) or "." not in os.path.basename(clean_path)) and os.path.isfile(clean_path):
+        # 2. Extract from .exe / .dll via pure ctypes SHGetFileInfoW
+        if os.path.isfile(clean_path):
             try:
-                import win32gui
-                import win32ui
-                import win32con
+                class SHFILEINFO(ctypes.Structure):
+                    _fields_ = [
+                        ("hIcon", ctypes.c_void_p),
+                        ("iIcon", ctypes.c_int),
+                        ("dwAttributes", ctypes.c_uint32),
+                        ("szDisplayName", ctypes.c_wchar * 260),
+                        ("szTypeName", ctypes.c_wchar * 80),
+                    ]
 
-                large, small = win32gui.ExtractIconEx(clean_path, icon_index)
-                hicon = None
-                if small and len(small) > 0:
-                    hicon = small[0]
-                elif large and len(large) > 0:
-                    hicon = large[0]
+                SHGFI_ICON = 0x000000100
+                SHGFI_SMALLICON = 0x000000001
+                SHGFI_USEFILEATTRIBUTES = 0x000000010
 
-                if hicon:
-                    hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
-                    hbmp = win32ui.CreateBitmap()
-                    hbmp.CreateCompatibleBitmap(hdc, 32, 32)
-                    memdc = hdc.CreateCompatibleDC()
-                    memdc.SelectObject(hbmp)
-                    win32gui.DrawIconEx(memdc.GetSafeHdc(), 0, 0, hicon, 32, 32, 0, 0, win32con.DI_NORMAL)
+                shfi = SHFILEINFO()
+                res = ctypes.windll.shell32.SHGetFileInfoW(
+                    clean_path,
+                    0,
+                    ctypes.byref(shfi),
+                    ctypes.sizeof(shfi),
+                    SHGFI_ICON | SHGFI_SMALLICON,
+                )
 
-                    bmpinfo = hbmp.GetInfo()
-                    bmpstr = hbmp.GetBitmapBits(True)
-                    pil_img = Image.frombuffer(
-                        "RGBA", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]), bmpstr, "raw", "BGRA", 0, 1
+                if res != 0 and shfi.hIcon:
+                    # Draw icon into DIB via GDI32 / User32
+                    hdc_screen = ctypes.windll.user32.GetDC(0)
+                    hdc_mem = ctypes.windll.gdi32.CreateCompatibleDC(hdc_screen)
+
+                    class BITMAPINFOHEADER(ctypes.Structure):
+                        _fields_ = [
+                            ("biSize", ctypes.c_uint32),
+                            ("biWidth", ctypes.c_int32),
+                            ("biHeight", ctypes.c_int32),
+                            ("biPlanes", ctypes.c_uint16),
+                            ("biBitCount", ctypes.c_uint16),
+                            ("biCompression", ctypes.c_uint32),
+                            ("biSizeImage", ctypes.c_uint32),
+                            ("biXPelsPerMeter", ctypes.c_int32),
+                            ("biYPelsPerMeter", ctypes.c_int32),
+                            ("biClrUsed", ctypes.c_uint32),
+                            ("biClrImportant", ctypes.c_uint32),
+                        ]
+
+                    bmi = BITMAPINFOHEADER()
+                    bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+                    bmi.biWidth = 32
+                    bmi.biHeight = -32  # Top-down DIB
+                    bmi.biPlanes = 1
+                    bmi.biBitCount = 32
+                    bmi.biCompression = 0
+
+                    p_bits = ctypes.c_void_p()
+                    hbmp = ctypes.windll.gdi32.CreateDIBSection(
+                        hdc_mem, ctypes.byref(bmi), 0, ctypes.byref(p_bits), 0, 0
                     )
 
-                    win32gui.DestroyIcon(hicon)
-                    for h in (large or []):
-                        try:
-                            win32gui.DestroyIcon(h)
-                        except Exception:
-                            pass
-                    for h in (small or []):
-                        try:
-                            win32gui.DestroyIcon(h)
-                        except Exception:
-                            pass
+                    if hbmp and p_bits:
+                        ctypes.windll.gdi32.SelectObject(hdc_mem, hbmp)
+                        ctypes.windll.user32.DrawIconEx(
+                            hdc_mem, 0, 0, shfi.hIcon, 32, 32, 0, 0, 3  # DI_NORMAL
+                        )
 
-                    ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
-                    cls._cache[clean_path] = ctk_img
-                    return ctk_img
+                        buffer = (ctypes.c_char * (32 * 32 * 4)).from_address(p_bits.value)
+                        raw_data = bytes(buffer)
+
+                        pil_img = Image.frombuffer("RGBA", (32, 32), raw_data, "raw", "BGRA", 0, 1)
+
+                        ctypes.windll.gdi32.DeleteObject(hbmp)
+                        ctypes.windll.gdi32.DeleteDC(hdc_mem)
+                        ctypes.windll.user32.ReleaseDC(0, hdc_screen)
+                        ctypes.windll.user32.DestroyIcon(shfi.hIcon)
+
+                        ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+                        cls._cache[clean_path] = ctk_img
+                        return ctk_img
+                    else:
+                        ctypes.windll.gdi32.DeleteDC(hdc_mem)
+                        ctypes.windll.user32.ReleaseDC(0, hdc_screen)
+                        ctypes.windll.user32.DestroyIcon(shfi.hIcon)
             except Exception:
                 pass
 
@@ -719,58 +757,14 @@ class UninstallEngine:
                         except OSError:
                             continue
 
-        # 2. Scan Safe User Registry Keys under HKCU\Software
-        log_callback(r"Auditing registry branch: HKCU\Software...")
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software", 0, winreg.KEY_READ) as sw_key:
-                num_subkeys, _, _ = winreg.QueryInfoKey(sw_key)
-                for idx in range(num_subkeys):
-                    try:
-                        sub_name = winreg.EnumKey(sw_key, idx)
-                        sub_lower = sub_name.lower()
-
-                        # Direct match under HKCU\Software\<AppName>
-                        matched_tok = cls._match_name_against_tokens(sub_lower, primary_tokens)
-                        reg_full = f"HKCU\\Software\\{sub_name}"
-                        if matched_tok and SafetyValidator.is_safe_registry_key(reg_full):
-                            discovered[reg_full.lower()] = LeftoverItem(
-                                item_type="REGISTRY",
-                                path=reg_full,
-                                size_bytes=0,
-                                matched_reason=f"Matched registry key '{matched_tok}'",
-                                selected=True,
-                            )
-                            continue
-
-                        # Nested match under HKCU\Software\<Publisher>\<AppName>
-                        vendor_tok = cls._match_name_against_tokens(sub_lower, vendor_tokens)
-                        if vendor_tok:
-                            with winreg.OpenKey(sw_key, sub_name, 0, winreg.KEY_READ) as vendor_key:
-                                v_count, _, _ = winreg.QueryInfoKey(vendor_key)
-                                for v_idx in range(v_count):
-                                    nested_name = winreg.EnumKey(vendor_key, v_idx)
-                                    nested_match = cls._match_name_against_tokens(
-                                        nested_name.lower(), primary_tokens
-                                    )
-                                    nested_reg_full = f"HKCU\\Software\\{sub_name}\\{nested_name}"
-                                    if nested_match and SafetyValidator.is_safe_registry_key(nested_reg_full):
-                                        discovered[nested_reg_full.lower()] = LeftoverItem(
-                                            item_type="REGISTRY",
-                                            path=nested_reg_full,
-                                            size_bytes=0,
-                                            matched_reason=f"Matched vendor key '{vendor_tok}\\{nested_match}'",
-                                            selected=True,
-                                        )
-                    except OSError:
-                        continue
-        except OSError:
-            pass
+        # 2. Skip Registry Key deletion entirely for maximum safety
+        log_callback(r"Skipping registry deletion: System registry left completely untouched (100% safe).")
 
         results = sorted(
             discovered.values(),
-            key=lambda item: (0 if item.item_type != "REGISTRY" else 1, -item.size_bytes, item.path.lower()),
+            key=lambda item: (-item.size_bytes, item.path.lower()),
         )
-        log_callback(f"Leftover audit complete. Identified {len(results)} candidate items.")
+        log_callback(f"Leftover audit complete. Identified {len(results)} candidate disk folders/files.")
         return results
 
     @staticmethod
@@ -1189,7 +1183,7 @@ class PureUninstallerApp(ctk.CTk):
 
         brand_sub = ctk.CTkLabel(
             self.sidebar,
-            text="Fluent Leftover Auditor v1.2.0",
+            text="Fluent Disk Leftover Auditor v1.2.0",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=PALETTE["accent"],
             anchor="w",
